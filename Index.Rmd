@@ -1,0 +1,717 @@
+---
+title: "Characteristing Species Diversity Across Environments"
+output: 
+  learnr::tutorial:
+    css: css/style.css
+runtime: shiny_prerendered
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning=FALSE,message=FALSE)
+
+library(dplyr)
+library(ggplot2)
+library(ggfortify)
+library(learnr)
+library(knitr)
+library(DT)
+library(shiny)
+library(gt)
+library(plotly)
+library(tidyverse)
+library(vegan)
+
+raw<-read.table("data/birdwatch.txt",sep = "\t")
+lad<-read.csv("data/georef-united-kingdom-local-authority-district.csv",sep=";")
+lad$Official.Name.Local.authority.district<-str_replace_all(lad$Official.Name.Local.authority.district,",",", ")
+
+
+
+
+
+
+text_remove<-str_split_fixed(str_split_fixed(raw$V1,"[0-9]",2)[,1]," ",2)
+colnames(text_remove)<-c("Species","County")
+
+number_remove<-str_split_fixed(str_remove(raw$V1,pattern = str_split_fixed(raw$V1,"[0-9]",2)[,1])," ",9)
+colnames(number_remove)<-c("Mean_2024","Rank_2024","Per_2024","Mean_2023","Rank_2023","Per_2023","Percent_Change","ChangeRank","ChangePer")
+
+bird_data<-data.frame(text_remove,number_remove) %>%
+  mutate(County=trimws(County),Species=trimws(Species)) %>%
+    mutate(    Mean_2024=as.numeric(Mean_2024),
+               Rank_2024=as.numeric(Rank_2024),
+            Per_2024 =as.numeric(Per_2024),
+            Mean_2023=as.numeric(Mean_2023),
+            Rank_2023=as.numeric(Rank_2023),
+           Per_2023 =as.numeric(Per_2023)) %>%
+  filter(County!="Lincolnshire (part of)")
+
+
+
+
+
+
+plot_theme<-theme_light()+
+  theme(plot.title=element_text(face =2,size=18),
+        axis.title=element_text(face =2,size=14),
+        plot.subtitle=element_text(face =3,size=14),
+        axis.text=element_text(face =1,size=12),
+        strip.text=element_text(face =1,size=12))
+
+birds_2024<-bird_data %>% 
+  dplyr::select(Species:Mean_2024) %>%
+  spread(Species,Mean_2024)
+
+county<-lad %>%
+  distinct(Official.Name.County.Unitary.district,Official.Name.Region,Official.Name.Country)
+
+scotland<-inner_join(birds_2024,county,by=c("County"="Official.Name.County.Unitary.district")) %>%
+  filter(Official.Name.Country=="Scotland")
+
+```
+
+## Introduction
+
+In this module we are going to start looking into statistical techniques which can help us to explain species diversity across different environments. We will do this in two ways:
+
+- Looking at calculating diversity indices within each environment and comparing them across the environments. We will talk about measures of abundance and the Shannon and Simpson diversity indices, and how each of these measures differs in what they can tell us 
+
+- Looking at multivariate analyses to help to characterise the different distributions of species between environments. We will look at one of the entries to multivariate analysis -  Cluster Analysis - specifically within the context of helping to explain "beta diversity"
+
+## Data Used
+
+The data is taken from the 2024 RSPB "Big Garden Birdwatch" - a citizen science project encouraging anyone in the country to record and take photos of which birds they observed in the area around their homes on a particular day. This data is summarised at county level and provides the average number per household for each of 80 different species that were recorded. 
+
+
+The data is made up of reports provided by 610,000 households in the UK, and a total of 9.5 million birds were reported by those households.
+
+```{r cars}
+DT::datatable(birds_2024)
+```
+
+
+We do have to be a bit careful with this data as a result - since there may be some potential bias due to the way in which it was collected. In each county there would have been different numbers of people reporting, and the numbers reporting may not have been proportional to the population sizes, or evenly distributed. There would also be questions over whether households were able to accurately identify each bird, particularly for those less common species. 
+
+
+## Components of Diversity
+
+Within any data which has counted observed frequencies of different species there are two easy ways in which we can start to assess the diversity within each observed are:
+
+a) how many different species were reported
+b) how many total species were reported, summing across all of the different species
+
+These two concepts, while simple, are fundamental to statistical ecology and are referred to as the "Species Richness", the total number of **different** species within the area of interest, and the "Total Abundance", the total number of species present in the given area.
+
+The *Abundance* would be the total number of a given species within a given area of interest. So in this data we may be thinking of this in terms of, for example:
+
+-   "the *abundance* of Skylarks with Wiltshire" 
+-   "the *total abundance* of all birds within Wiltshire"
+-   "the *species richness* of birds within Wiltshire"
+
+### Richness
+
+For the data we are exploring it is easy to get the assessment of the species richness by identifying how many of the 80 species were observed:
+
+```{r}
+diversity_data<-bird_data %>% 
+  group_by(County) %>%
+  summarise("Species Richness"=sum(Mean_2024>0),"Total Abundance"=sum(Mean_2024),
+            Shannon=vegan::diversity(as.numeric(Mean_2024),index="shannon"),
+            Simpson=vegan::diversity(as.numeric(Mean_2024),index="simpson"),
+            invsimpson=vegan::diversity(as.numeric(Mean_2024),index="invsimpson"),
+            InvSd=1/sd(Mean_2024[Mean_2024>0]),
+            PilouJ=Shannon/log(`Species Richness`))
+```
+
+```{r,fig.height=10}
+(diversity_data %>%
+  mutate(County=reorder(County,`Species Richness`))%>%
+         ggplot(aes(x=`Species Richness`,y=County))+
+  geom_col()+
+  ggtitle("Number of Different Species: Species Richness")) %>%ggplotly()
+```
+
+Dumfries and Galloway had the most different number of bird species identified, 52, and the Isles of Scilly had the fewest.
+
+### Abundance
+
+The abundance, and total abundance, are a little more challenging! We are dealing with very large geographic areas (counties), with non-randomly selected sampling units (households who chose to participate), a three-day observation period and a count of species which by definition do have a tendency to move around quite a lot (birds).
+
+So it would be impractical to try to calculate any sort of estimate for the total number of birds per county based on the data collected. But what we can estimate from the data is a "per-household" estimate of the abundance of the different bird species - which will not impact on any of the statistical measures in terms of calculation but only in terms of interpretation. When dealing with these sort of diversity analyses it is often necessary or advisable to be considering making adjustments like this to enable for a better understanding of the site diversity. 
+
+Having a "per-household" estimate of species abundance is in itself not so common outside of citizens science initiatives like this; instead it is a convenient measure to give a proxy for the overall abundance. But making adjustments of abundance and diversity per area would be extremely common. This could also be something we could consider with this dataset. 
+
+Another common adjustment would be to go beyond the "abundance", of simply counting the species, and instead consider the biomass of our species. This would be particularly important when considering an ecosystem containing species of very different sizes:
+
+For example: 
+In Woodland A we observed 6 foxes, 20 rabbits and 100 ants 
+In Woodland B we observed 1 fox, 1 rabbit and 250 ants 
+
+The 'total abundance' in Woodland B is about double that in Woodland A; but the "total biomass" in Woodland A is around 9 times larger than that of Woodland B. 
+
+Given the more limited range of biomass between different bird species, that sort of adjustment is unlikely to make too much of an impact here.
+
+Let's compare how the total abundance (per household) and the species richness compare to each other:
+
+```{r}
+(ggplot(diversity_data,aes(y=`Total Abundance`,x=`Species Richness`,County=County))+
+  geom_point()+
+   ylab("Average Abundance per Household")+
+   xlab("Number of Different Species: Species Richness")+
+  plot_theme) %>% ggplotly()
+```
+
+We can see there is, perhaps surprisingly, very little correlation between the two measures across our counties.
+We already noted that Dumfries and Galloway had the most different species of any county, and this also had a high average number of birds observed per household. But there are many counties with only a few less species identified that have a much lower average abundance - Dorset, Somerset and Edinburgh for example. And there are also counties with low numbers of different species that have even higher average numbers of birds identified. If you hover over those three points you may notice a common pattern: they relate to Isles of Scilly, Shetland Islands and Eilean Siar (formerly known as the Western Isles).
+
+### Evenness
+
+There is one final component which makes up the measures of diversity - evenness; that is how evenly distributed each species is within an environment.
+For example:
+In both County A and County B we observed 10 different species, and an average total of 20 birds.
+In County A - all 10 bird species were observed an average of 0.5 times per household
+In County B - one bird species was observed an average of 19.1 times per household, and the other 9 were observed an average of 0.1 times per household.
+
+County A has a much higher evenness than County B; despite both having the same species richness and the same total abundance.
+
+When considering evenness and comparing it across different environments we are no longer thinking about "abundance" of each species in an environment, but thinking about the "relative abundance" of each species. That is what percentage of the total species in a given environment belong to a given species. 
+
+A common measure of evenness is known as "Pilou's J" - where a value of 1 would indicate the species were all observed with equal frequency, and the smaller the value the less even the distribution. We will come back to the formula for this in the next section, but first let's see how this measure relates to the species richness and total abundance:
+
+```{r}
+(ggplot(diversity_data,aes(y=PilouJ,x=`Species Richness`,County=County))+
+  geom_point()+
+   ylab("Evenness (Pilou's J)")+
+   xlab("Number of Different Species: Species Richness")+
+  plot_theme) %>% ggplotly()
+```
+
+```{r}
+(ggplot(diversity_data,aes(y=PilouJ,x=`Total Abundance`,County=County))+
+  geom_point()+
+   ylab("Evenness (Pilou's J)")+
+   xlab("Average Abundance per Household")+
+  plot_theme) %>% ggplotly()
+```
+
+From these plots the first thing that catches our attention is the four very different looking counties, with low richness, low evenness and a high average count of birds per household. From this, without looking at the data, we can infer that in these counties there is likely to be a very small number of bird species observed a very large number of times per household on average.
+
+Ignoring the four island counties we can see a slight negative correlation between evenness and richness - those counties with more different species of birds tended to have less even spread in the relative abundance of each bird.
+
+Our relationship between evenness and abundance is much less strong; in fact outside of our island counties there seems to be almost no correlation between the two.
+
+Let's pick out some of the more extreme counties, to see how this looks in relation to the actual data itself:
+
+```{r}
+bird_data %>%
+  mutate(County=trimws(County),Species=trimws(Species)) %>%
+  filter(County%in%c("Isle of Man","Shetland Islands","Dumfries and Galloway")) %>%
+  filter(as.numeric(Mean_2024)>0) %>%
+  group_by(County) %>%
+    mutate(RelativeAbundance=Mean_2024/sum(Mean_2024)) %>%
+  ungroup() %>%
+  mutate(Species=reorder(Species,as.numeric(RelativeAbundance))) %>%
+  ggplot(aes(y=Species,x=as.numeric(RelativeAbundance)))+
+  geom_col(col="black")+
+  plot_theme+
+  facet_wrap(~County,nrow=1)+
+  scale_x_continuous(labels=scales::percent)
+```
+
+-   The relative abundance within the Shetland Islands is dominated by just two species
+
+-   Both Dumfries and Galloway and the Isle of Man have fairly evenly spread distributions - although house sparrows are common there are many other species contributing substantially to the total. But Dumfries and Galloway has more different species, hence a higher richness, and most of the species observed in Dumfries and Galloway were rare, which is why it scored slightly less in evenness than the Isle of Man.
+
+
+## Diversity Indices
+
+Diversity indices are a way of summarising down the trade-off between evenness and richness of species within a given area to a single number, for ease of comparison and use in further analysis. This is known as "alpha diversity".
+
+There are two fairly commonly indices the Shannon-Weiner index and the Simpson index, both of these look to provide a trade-off between the richness and the evenness. 
+In most situations they will be extremely highly correlated, and that is the case here:
+
+```{r}
+(ggplot(diversity_data,aes(y=Shannon,x=Simpson,County=County))+
+  geom_point()+
+  plot_theme) %>% ggplotly()
+```
+
+### Simpson's Index
+
+Simpson's index can be interpreted as the probability that any two individuals randomly selected from within the population will come from different Species. If there is just one species present in a population by definition this will be 0. As the number of species increases the maximum possible score for the Simpson index will become closer to 1. 
+And as the evenness of the distribution between species increases then the score will tend closer to the maximum potential score for the index given the number of species observed. e.g. if just 3 different species are observed the maximum possible score of the Simpson index is 0.666, which would be achieved when all three Species have equal relative abundance.
+
+### Shannon's Index
+
+The Shannon-Weiner index is defined by taking the relative abundance of each species, multiplying this by the log of the relative abundance , then summing this across all species and multiplying by -1. 
+The larger the value, then the higher the diversity that exists within the population, although it is difficult to give the number any direct meaning or interpretation that is particularly useful (although some people do try). Theoretically there is no upper limit on the Shannon Index - the largest value for a given number of species identified would be the log of the number of species identified, but it is extremely unlikely to find a situation where it will be less than 1 or more than 4.
+
+A general interpretation of the value of the index is that it is equal to the log of Richness multiplied by the Evenness. 
+As such the value of evenness we used in the previous section, Pilou's J, is calculated on this basis - it is calculated by taking the Shannon Index and dividing it by the log of the number of species.
+
+### Differences between the two methods
+
+The Simpson method places slightly greater weight onto the evenness of the species, and the Shannon-Weiner method will put slightly more emphasis on the richness. 
+
+You can see this by comparing Merthyr Tydfil and North Lanarkshire - both score identically on the Shannon-Weiner index, but differently on the Simpson index. Merthyr Tydfil has a higher richness than North Lanarkshire but a lower evenness. These cancel each other out on the Shannon-Weiner index, but the weighting in favour of evenness gives a higher value for the Simpson index for North Lanarkshire.
+
+```{r}
+diversity_data %>%
+  select(County, `Species Richness`,PilouJ,Shannon,Simpson) %>%
+  filter(County%in%c("Merthyr Tydfil","North Lanarkshire")) 
+```
+
+The reverse can be seen when comparing Devon and Merseyside - the Shannon index score indicates higher diversity in Devon over Merseyside, where the Simpson index gives them both the same score. And in this case Devon has a higher richness score and a lower evenness score, and this is sufficient with the weighting in favour of richness in the Shannon index to give a higher score for Devon, whilst the two cancel each other out in the Simpson index.
+
+```{r}
+diversity_data %>%
+  select(County, `Species Richness`,PilouJ,Shannon,Simpson) %>%
+  filter(County%in%c("Devon","Merseyside")) 
+```
+
+Part of the reason they are are so common is because the formulae are relatively easy to calculate 'by hand'... but in the 21st century then calculating these by hand is not something that I would ever recommend, and there may be other more appropriate alternatives out there. 
+
+### Important Considerations & Limitations
+
+### Sampling & Scope
+
+One thing we haven't considered about the 'strange-ness' of the four island counties is not whether they are different because they are more remote islands, but whether they are different because fewer people live there and as a result there will be fewer people participating in the survey.
+
+The observed species richness is strongly dependent on sample size, and length of observation period. Within this survey there may have been tens of thousands of households participating in Cornwall, but only tens of households participating in the Scilly Isles. This is particularly important for being able to count rare species within the population - more different locations and more people observing over a longer period of time increases the potential for the rarer species to be identified. With a small number of observations and a small observation period we are almost certain to under-estimate the species richness, and thus underestimate the "true" values of our diversity indices.
+
+These diversity indices are perhaps best considered as another form of summary statistic, similar to those we encountered when doing exploratory data analysis. They help to provide us with some information to allow us to characterise and compare diversity *within an environment*. But they are perhaps of less use when comparing between environments - as in order to be able to make direct comparisons we would need to assume that the theoretical maximum capacity for diversity is the same in each of the environments we are comparing. The Simpson and Shannon indices are not measures which lend themselves particularly well to being adjusted "per-capita" or "per-area". While the "evenness" of species can be adjusted in this way - with calculations based on relative measures of abundance, the formulae would always rely on having a total number of species as the measure of richness, so this cannot be adjusted in the same way. Cornwall with an area of 3,500 sq-km would definitely seem to have a much higher capacity for more different birds being observed as compared to the Isles of Scilly with an area of 16 sq-km. 
+
+Without the raw data at household data this is not something we can pursue further with this dataset. But there are methods to allow for improvements to the comparability between these measures through adjustments called "rarefaction". You can read more about this here: 
+https://www.frontiersin.org/journals/microbiology/articles/10.3389/fmicb.2019.02407/full
+https://www.scielo.sa.cr/scielo.php?script=sci_arttext&pid=S0034-77442009000300001
+
+### Other forms of diversity
+
+These measures of "alpha" diversity also fail to capture diversity **across different environments**. Even where we do compare the Shannon/Simpson index across environments they only compare the internal levels diversity - they do not account for whether the same species are being seen in different environments, whether there exist certain species are seen only in small numbers of environments, or certain environments with large numbers of rare species, or whether different species are dominant in different environments. 
+
+These are all concepts which link to what is known as "beta" diversity, which focuses on this diversity in the species population across environments. There are a lot of different metrics that can be used to understand this concept of "Beta Diversity" by comparing the similarity in the populations of between sites. 
+
+There us an often cited paper that outlines 24 different options here: https://besjournals.onlinelibrary.wiley.com/doi/10.1046/j.1365-2656.2003.00710.x
+
+But that is only the starting point - as that paper solely considers beta diversity in terms of presence/absence - there are many more than that when starting to consider the difference in abundances between sites! 
+
+There is a good overview of the limitations of "alpha" diversity measures, and some of the entry points to understanding beta diversity here: https://ecologyforacrowdedplanet.wordpress.com/2016/01/14/beta-diversity-what-is-it-good-for/
+
+## Cluster Analysis
+
+The key concept in understanding "beta diversity" is to produce a measures of similarity - both to be able to understand how similar sites are to each other, but this can also be used to understand how similar species are to each other in terms of patterns in their habitats.
+
+This concept of "similarity" has much wider applicability beyond just diversity analysis - so we will look into it through a slightly broader lens and look into measures of dissimilarity and how they link into cluster analysis. This can be used whenever we are faced with the scenario of having data across many variables and we are interested in whether there exist clusters of our observational units where we have similarities across those variables.
+
+### Data
+
+For this part of the analysis we will use the same data as before, but restrict ourselves only to the counties based in Scotland
+
+```{r}
+DT::datatable(scotland)
+```
+
+We will start out with the question of trying to identify clusters in our sites, in this case the different Scottish counties.
+
+### Similarity
+
+To be able to determine this we first need to calculate a "dis-similarity" matrix which calculates the "distance" between every possible pairwise combination of two sites. If two sites had identical results across all bird species then the "distance" between them would be 0; and the larger the differences between the sites then the larger the value of the distance. The different methods mentioned earlier all relate to different processes for calculating this distance, as different criteria for similarity can be emphasised and the results may be sensitive to outliers.
+
+The simplest measure of distance is known as the "Euclidean" distance - taken by calculating the sum of squared differences from within each variable.
+
+Let's look at a simple example with just 3 bird species in 3 of the Scottish Counties. Remember that the numbers in the data refer to a "per-household" measure of abundance, the average number of each species of bird observed by each household participating in the survey.
+
+```{r}
+scotland[c(1:2,26),c("County","Magpie","Chaffinch","Raven")] %>%
+  gt() %>% fmt_number(decimals=2)
+```
+
+The "Euclidean" distance between "Aberdeen City" and "Aberdeenshire" for these two bird species would be equal to:
+sqrt((1.53-0.74)**2 + (1.09-3.11)**2) + (0.00-0.01)**2)
+
+Which is equal to 2.17.
+
+We can also calculate the distances for the other two pairwise combinations - and display these in a matrix:
+
+```{r}
+tst1<-scotland[c(1:2,26),c("Magpie","Chaffinch","Raven")]
+rownames(tst1)<-c("Aberdeen City" , "Aberdeenshire","Shetland Islands"   )
+dist(tst1)
+```
+
+So we can see looking just at these two species the "distance" is lowest between Shetland Islands and Aberdeen City, and highest between Shetland Islands and Aberdeenshire.
+
+### Choice of Variable
+
+The reason why there are so many different measures of "Beta Diversity" is because this process of calculating the "distance" can be done in so many different ways to characterise similarity in different ways! The first question is to determine which variable we should be looking at to calculate the distances on? 
+
+Looking at the household average abundance per species will mean that the comparison of species similarity will be driven by differences in the total abundance across all species between the environments. 
+The main reason Aberdeenshire came to look so different to Aberdeen City was because of the much larger number of Chaffinches identified in that county. Where an environment consistently has higher numbers of species identified in total, the distance to other environments will always be large even if similar species are identified in similar relative proportions. 
+So we instead may be interested in comparing the similarity based on the relative abundance (the % a species from the population of all birds within that environment), rather than the total abundance:
+
+```{r}
+tst1<-scotland[,2:81] / rowSums(scotland[,2:81])
+
+
+disp_rel<-tst1[c(1:2,26),c("Magpie","Chaffinch","Raven")]
+rownames(disp_rel)<-c("Aberdeen City" , "Aberdeenshire","Shetland Islands"   )
+gt(disp_rel,rownames_to_stub = TRUE,caption = "Relative Abundance (Calculated Across All Species)") %>% fmt_number(decimals=4)
+
+tst2<-tst1[c(1:2,26),c("Magpie","Chaffinch","Raven")]
+
+rownames(tst2)<-c("Aberdeen City" , "Aberdeenshire","Shetland Islands"   )
+dist(tst2)
+```
+
+So we now see something a little different - Aberdeen City and Aberdeenshire are now the most similar of the 3 counties where we compare these 3 birds.
+
+And we may also be interested in species diversity, without worrying about the abundance of species, in which case we would want to consider distance based on presence/absence of a given species. Ravens were not observed in Aberdeen City, but were observed in the other two counties. The other two species were observed in all three counties. Therefore considering the distance based on presence absence - Aberdeenshire and Shetland Islands have a distance of 0, but Aberdeen City will have a distance of 1 away from the other two counties.
+
+```{r}
+tst1<-scotland[c(1:2,26),c("Magpie","Chaffinch","Raven")]
+rownames(tst1)<-c("Aberdeen City" , "Aberdeenshire","Shetland Islands"   )
+
+dist(tst1>0,method = "euclidean")
+```
+
+
+
+### Choice of Distance Measure
+
+The second component to consider is how we choose to measure the distance in a multi-dimensional context. You can read a little about some of the most common options here:
+https://www.geeksforgeeks.org/measures-of-distance-in-data-mining/
+
+The Euclidean distance is generally the 'default' option within most software, in two dimensions this represents the shortest possible distance between points. 
+
+For count or numeric data we may also consider the use of the "Manhattan". The "Manhattan" distance is names by thinking in terms of the street layout of Manhattan in New York - everything is arranged into blocks. So to get from point "A" to point "B" you could not follow the shortest possible route diagonally - you would need to only be able to walk following the blocks horizontally and vertically. So the distance measure is calculated by summing the distances in each individual variable.
+
+Across high-dimensional data, which we do have here with 81 different bird species to consider, the manhattan distance is often preferred as it is less sensitive to the presence of outliers, and places less theoretical assumptions on the distance calculation.
+
+If we go back to the average abundance per household:
+
+```{r}
+tst1<-scotland[,2:81] 
+
+
+disp_rel<-tst1[c(1:2,26),c("Magpie","Chaffinch","Raven")]
+rownames(disp_rel)<-c("Aberdeen City" , "Aberdeenshire","Shetland Islands"   )
+gt(disp_rel,rownames_to_stub = TRUE,caption = "Average Abundance") %>% fmt_number(decimals=2)
+
+tst2<-tst1[c(1:2,26),c("Magpie","Chaffinch","Raven")]
+
+rownames(tst2)<-c("Aberdeen City" , "Aberdeenshire","Shetland Islands"   )
+
+dist(tst2,method="euclidean")
+dist(tst2,method="manhattan")
+```
+
+
+
+When dealing with Presence/Absence data then an alternative option would be the "Jaccard" distance - which is calculated based on the overlapping areas between the species present in the environments, rather than accumulated from the summing individual paired distances.
+
+
+You can see how the choice of distance method and the choice of variable to calculate distances on, can impact on our overall similarity matrix below.
+
+```{r dists_ui, context="render",echo=FALSE}
+selectInput("variable","Select Variable",choices=c("Average Abundance","Relative Abundance","Presence/Absence"))
+selectInput("method","Select Distance Method",choices=c("euclidean","manhattan","Jaccard"="binary"))
+
+plotlyOutput("distance_plot",height = "600px",width = "700px")
+
+
+```
+
+
+
+
+```{r dists_out, context="server"}
+output$distance_plot<-renderPlotly({
+  
+  if(input$variable=="Average Abundance"){tst1<-scotland[,2:81]}
+if(input$variable=="Relative Abundance"){tst1<-scotland[,2:81] / rowSums(scotland[,2:81])}
+if(input$variable=="Presence/Absence"){tst1<-scotland[,2:81]>0}
+rownames(tst1)<-scotland$County
+
+dtst<-dist(tst1,method=input$method)
+
+(data.matrix(dtst) %>% 
+  data.frame(check.names = FALSE)  %>%
+ dplyr::mutate(county1=rownames(tst1) ) %>%
+  gather("county2","distance",-county1) %>%
+  ggplot(aes(x=county1,y=county2,fill=distance))+
+  geom_tile(col="black")+
+  scale_fill_gradient(low="white",high="black")+
+  theme(axis.text.x=element_text(angle=90,hjust=1))) %>% ggplotly
+
+})
+
+```
+
+
+
+A few key aspects of these choices can be seen from the outputs:
+
+Whichever method we chose we will nearly always be able to identify the Orkney Islands and Shetland Islands as being extremely different to the remaining counties.
+
+The euclidean method is more sensitive to outliers - the Shetland Islands is stands out much more strongly compared to the other counties when this method is used, but there is also less of distinction between the counties which are more similar. So compared to the Manhattan method it can be considered as better for identifying the differences between pairs, but perhaps not as good for identifying the finer detail in the similarities.
+
+A similar pattern is true of looking at the average abundance vs the relative abundance. The distances based on average abundance numbers will also flag up the Shetlands and Orkneys much more so than the alternatives - in this case because of how high the overall average totals were in these counties. Again this trend seems to drown out a lot of the potential to distinguish between patterns for those counties which are more similar.
+
+If we chose the "Jaccard" distance method - it does not matter which version of the variable we choose; the distance will be the same as it solely derived based on presence/absence of a species.
+
+The distance 'units' are not the same for the Jaccard measure as they are for the Manhattan and Euclidean. Jaccard distance will always be between 0 and 1; the Manhattan and Euclidean measures will be based on the units of the chosen variables (i.e. average abundance - birds per household, relative abundance - proportion of total birds, presence-absence - on a 0-1 scale 
+
+But this distance matrix, while an efficient display of lots of numbers, does not help us much to identify clusters within our data. Instead it only really helps us to pick out the outliers, like the shetland islands, which are different to everything else.
+
+### Hierachical Clustering
+
+And this is where the statistical technique of "cluster analysis" can come in. This method can work in a number of ways - the simplest being "single" clustering:
+
+- Start by declaring that all of the observations are members of different clusters, so we have `n` clusters
+- Then identify the pair of observations with the shortest distance to each other. These observations are then together joined to form part of a cluster, and we record the distance between the two clusters. The remaining observations are left alone, and still considered to be their own cluster. So we have `n-1` clusters.
+- Then identify the pair of *clusters* with the shortest distance to each other. This could be created by joining two observations, or by joining the cluster we created in a previous step to an observation. In single clustering we will join based on the shortest possible distance between any members of our existing clusters. So we have `n-2` clusters.
+- Repeat this process `n` times until we have joined together sequentially all of our observations into single cluster
+- Then analyse the results, to help provide some insights into what a sensible number of clusters may be for this process
+
+The way in which do this analysis is through plotting a dendrogram:
+
+
+```{r,fig.height=7}
+
+tst1<-scotland[,2:81] / rowSums(scotland[,2:81])
+
+rownames(tst1)<-scotland$County
+
+dtst<-dist(tst1,method="manhattan")
+
+
+hclust(dtst,method="single") %>% plot()
+
+```
+
+The way in which we interpret the dendrogram follows through something of the reverse process of the way in which we calculated the clusters.
+
+Start at the top of plot; where we have just one giant cluster of all our observations. We then look to see where our first split is - which in this case separates out the Orkney and Shetland Islands from all other counties. The value on the y axis where the split occurs, at just below 0.8, represents the distance between the two clusters.
+So if we were to consider that there were 2 clusters in the data, cluster one would contain the Orkney and Shetland Islands and cluster two would contain everywhere else in Scotland.
+
+We can then move down and look for the next split - and here the next split at around 0.45 and would keep the large cluster unchanged, but split out the Orkney Islands from the Shetland Islands into seperate clusters.
+
+In this analysis there is then a large jump down to the next split, which would separate out Argyll and Bute from the remainder of Scotland, but then very little distance between the remaining clusters. When the splits come extremely close together like this that is usually an indication that the members of that particular group are all very similar to each other, and we probably can consider them to be parts of the same cluster. We will often make our decision on how many clusters are present in the data based on a scree plot - comparing the distance between clusters and the number of clusters we are creating and looking for an "elbow":
+
+
+```{r}
+data.frame(height=hclust(dtst,method="single")$height,
+           nclust=length(hclust(dtst,method="single")$height):1) %>%
+  ggplot(aes(y=height,x=nclust))+
+  geom_line()+
+   geom_point()+
+  plot_theme+
+  xlab("Number of Clusters")+ ylab("Height")
+```
+
+From this plot we can see a clear "elbow" after 3 points, indicating that the marginal gains of considering more than 3 clusters quickly start to disappear.
+
+The "single" method of clustering is another method which will again favour the splitting out of extreme outliers, and perhaps lose the ability to identify similarities. It will always tend towards a conclusion of finding a small number of clusters
+
+The "complete" method will do the opposite - emphasising the similarities over the differences. When deciding which clusters to join together it will now look for the largest difference in the distance between members. 
+
+```{r,fig.height=7}
+hclust(dtst,method="complete") %>% plot()
+```
+
+This time, although we do still see an "elbow point" at 3 clusters the distance does still clearly continue to decrease by non-negligible amounts well beyond this. Here we may make an argument for selecting either 3, 9, 12 or 14 clusters.
+
+```{r}
+data.frame(height=hclust(dtst,method="complete")$height,
+           nclust=length(hclust(dtst,method="single")$height):1) %>%
+  ggplot(aes(y=height,x=nclust))+
+  geom_line()+
+   geom_point()+
+  plot_theme+
+  xlab("Number of Clusters")+ ylab("Height")
+```
+
+But if we go back to the dendrogram we also see that if we were to have selected three clusters, these would have been different to the three clusters we identified from the single clustering method. The first split, separating out the Orkneys and Shetlands, remained the same, but then the break into 3 clusters separated out two large groups of counties from our remaining set. Looking at the members of these clusters also suggests some possible explanation: one of them contains most of the urban areas of Scotland - Dundee, Aberdeen, Edinburgh, Glasgow; the other cluster contains a lot of the more rural and sparsely populated counties - Moray, Highland, Argyll and Bute. It is not a perfect split in those terms, but the pattern does look relatively consistent! 
+
+The single and the complete methods represent two extremes of clustering - very often we will find that the clusters identified by using the single linkage method are too few and too sparse to be useful; and the clusters identified by the the complete method will be too many to fully get to grips with. There are lot's of methods in the middle of these two extremes - the easiest to understand being the "average" linkage method, based on the average distance.
+
+```{r,fig.height=7}
+hclust(dtst,method="average") %>% plot()
+```
+
+```{r}
+data.frame(height=hclust(dtst,method="average")$height,
+           nclust=length(hclust(dtst,method="single")$height):1) %>%
+  ggplot(aes(y=height,x=nclust))+
+  geom_line()+
+   geom_point()+
+  plot_theme+
+  xlab("Number of Clusters")+ ylab("Height")
+```
+
+This time we see clear elbow points at either 4 or 7 clusters. And this looks like a like more useful set of options to us than the previous two methods! 
+
+
+```{r dd_ui, context="render",echo=FALSE}
+selectInput("clusteringvariable","Select Variable",choices=c("Average Abundance","Relative Abundance","Presence/Absence"))
+selectInput("distancemethod","Select Distance Method",choices=c("euclidean","manhattan","Jaccard"="binary"))
+selectInput("clusteringmethod","Select Clustering Method", choices=c("single","complete","average"))
+sliderInput("n_cluster","Select Number of clusters", min=1,max=20,value = 3)
+
+  plotOutput("dd",height="500px")
+plotlyOutput("scree_plot")
+
+
+```
+
+
+```{r dd_out, context="server"}
+
+output$dd<-renderPlot({
+if(input$clusteringvariable=="Average Abundance"){tst1<-scotland[,2:81]}
+if(input$clusteringvariable=="Relative Abundance"){tst1<-scotland[,2:81] / rowSums(scotland[,2:81])}
+if(input$clusteringvariable=="Presence/Absence"){tst1<-scotland[,2:81]>0}
+
+rownames(tst1)<-scotland$County
+dtst<-dist(tst1,method=input$distancemethod)
+
+hclust(dtst,method=input$clusteringmethod)->tree1
+
+plot(tree1)
+rect.hclust(tree1,k = as.numeric(input$n_cluster))
+})
+output$scree_plot<-renderPlotly({
+  
+  if(input$clusteringvariable=="Average Abundance"){tst1<-scotland[,2:81]}
+if(input$clusteringvariable=="Relative Abundance"){tst1<-scotland[,2:81] / rowSums(scotland[,2:81])}
+if(input$clusteringvariable=="Presence/Absence"){tst1<-scotland[,2:81]>0}
+
+rownames(tst1)<-scotland$County
+dtst<-dist(tst1,method=input$distancemethod)
+  
+  data.frame(height=hclust(dtst,method="average")$height,
+           nclust=length(hclust(dtst,method="single")$height):1) ->heights
+ heights %>%
+   mutate("Selected Number"=ifelse(nclust==as.numeric(input$n_cluster),nclust,0))%>%
+  ggplot(aes(y=height,x=nclust))+
+  geom_line()+
+   geom_point(aes(col=as.character(`Selected Number`)),show.legend = FALSE)+
+   scale_colour_manual(values=c("black","red"))+
+  plot_theme+
+  xlab("Number of Clusters")+ ylab("Height")+
+   theme(legend.position = "none")
+})
+
+```
+
+### Choices!
+
+There are no "correct" answers for what the best methods are to deal with this analysis: whether you consider the total abundance an important component of the between-site diversity; whether you consider the presence of species to be the most important component. And whether you are more interested in trying to split out the sites that are the most different from each other, trying to group together the sites which are the most similar to each other, or looking for a trade-off between the two. And how much of a trade-off you are willing to make for where you draw the line on how many potential clusters may exist within the data.
+
+The higher level patterns that we see will always be the same regardless of the method. However we chose to do this analysis we always would find the Shetland and Orkney Islands looking different to anywhere else, and also fairly different to each other. And, at the other end of the scale we would always find that North Ayrshire and South Ayrshire forming part of the same cluster.
+
+Because of the level of subjectivity that exist in the choices at every stage of the process cluster analysis is generally considered to be an exploratory method. It will help you to understand what patterns exist, and why they may exist. It can also be a good way to check the coherence of large datasets - if you know that clusters between observations exist in reality, across multiple dimensions but cannot be identified from the data this may raise some immediate questions over the coherence of the dataset. You will rarely see it used as a way to test hypotheses over cluster membership or size, or form the basis of more formal confirmatory statistical analysis. (ideally you would never see this; but this is unfortunately not the case!)
+
+## Exercises
+
+### Question 1
+
+SOMETHING ABOUT SHANNON/SIMPSON
+
+### Question 2
+
+In the workbook we looked at clustering together the counties, based on the observations of which species were present and in what levels of abundance.
+
+But as we referred to at the start of the section we can go through the exact same procedure to cluster together species based on whether they are found in similar environments. Here we consider each species to be an observation, and consider the pairwise distances in each combination of species the differences accumulated across their abundance/presence from every environment.
+
+Again we will stick to just the data from Scotland - and we will restrict the analysis to only those species of birds that appeared in at least 25 different counties.
+```{r}
+
+tst1<-t(scotland[,2:81])[ colSums(scotland[,2:81]>0)>=25,]
+colnames(tst1)<-scotland$County
+DT::datatable(tst1)
+```
+
+A summary of the abundances of each of the species across the 31 Scottish counties can be found below:
+
+```{r}
+scotland %>%
+  gather(Species,ab,2:81) %>%
+    group_by(Species) %>%
+      summarise("Average Abundance" = mean(ab),"Number of Counties"=sum(ab>0)) %>%
+  filter(`Number of Counties`>25) %>%
+  arrange(desc(`Number of Counties`),desc(`Average Abundance`)) %>%
+  gt() %>%
+  fmt_number(column=2,decimals=3)
+  
+```
+
+
+Below you can explore below a cluster analysis and all of the output we saw in the workbook associated with the cluster analysis, based on making different choices along the way.
+
+You can investigate to see what common patterns emerge, and what differences come through from the selection of different methods.
+
+In particular try to consider:
+- Can you explain why the "clusters" based on abundance look so different to the clusters based on presence/absence? Any set of choices for the methodology will usually result in their being one large "megacluster" - but if you look at the birds that are included in that larger cluster it is almost the opposite sets of birds being clustered together vs. those being split out when comparing the analyses based on abundance to those based on presence/absence.  
+
+```{r dd_ui2, context="render",echo=FALSE}
+selectInput("clusteringvariable2","Select Variable",choices=c("Average Abundance","Relative Abundance","Presence/Absence"))
+selectInput("distancemethod2","Select Distance Method",choices=c("euclidean","manhattan","Jaccard"="binary"))
+selectInput("clusteringmethod2","Select Clustering Method", choices=c("single","complete","average"))
+sliderInput("n_cluster2","Select Number of clusters", min=1,max=25,value = 3)
+
+  plotOutput("dd2",height="500px")
+plotlyOutput("scree_plot2")
+
+
+```
+
+
+```{r dd_out2, context="server"}
+
+output$dd2<-renderPlot({
+  
+ 
+  
+if(input$clusteringvariable2=="Average Abundance"){tst1<-scotland[,2:81]}
+if(input$clusteringvariable2=="Relative Abundance"){tst1<-scotland[,2:81] / rowSums(scotland[,2:81])}
+if(input$clusteringvariable2=="Presence/Absence"){tst1<-scotland[,2:81]>0}
+
+  tst1<-t(tst1)[ colSums(scotland[,2:81]>0)>=25,]
+ 
+colnames(tst1)<-scotland$County
+dtst<-dist(tst1,method=input$distancemethod2)
+
+hclust(dtst,method=input$clusteringmethod2)->tree1
+
+plot(tree1)
+rect.hclust(tree1,k = as.numeric(input$n_cluster2))
+})
+output$scree_plot2<-renderPlotly({
+  
+  if(input$clusteringvariable2=="Average Abundance"){tst1<-scotland[,2:81]}
+if(input$clusteringvariable2=="Relative Abundance"){tst1<-scotland[,2:81] / rowSums(scotland[,2:81])}
+if(input$clusteringvariable2=="Presence/Absence"){tst1<-scotland[,2:81]>0}
+
+rownames(tst1)<-scotland$County
+dtst<-dist(tst1,method=input$distancemethod2)
+  
+  data.frame(height=hclust(dtst,method="average")$height,
+           nclust=length(hclust(dtst,method="single")$height):1) ->heights
+ heights %>%
+   mutate("Selected Number"=ifelse(nclust==as.numeric(input$n_cluster2),nclust,0))%>%
+  ggplot(aes(y=height,x=nclust))+
+  geom_line()+
+   geom_point(aes(col=as.character(`Selected Number`)),show.legend = FALSE)+
+   scale_colour_manual(values=c("black","red"))+
+  plot_theme+
+  xlab("Number of Clusters")+ ylab("Height")+
+   theme(legend.position = "none")
+})
+
+```
+
+https://www.flutterbys.com.au/stats/tut/tut13.2.html
