@@ -58,7 +58,7 @@ environments.
 The terminology used is often a little abstract, and often feels a
 little unconnected to other areas of statistics, and the caveats around
 the usage of these measures are extremely important to recognise when
-trying to interpet measures of diversity.
+trying to interpret measures of diversity.
 
 I talk through in the video here:
 
@@ -432,7 +432,7 @@ diversity_data %>%
 
 ### Important Considerations & Limitations
 
-### Sampling Design 
+### Sampling Design
 
 In this case we have used an observational citizen science dataset to
 try to assess diversity.
@@ -500,7 +500,7 @@ objective was to record all birds, which is a pretty straightforward
 category to define the limits of. But if your focus is more related to
 understanding the full diversity within *environments,* then you would
 have to think carefully about which species would be included. If we
-wanted to try to classify all possible macrofauna, flora, insects,
+wanted to try to classify all possible macro-fauna, flora, insects,
 mammals, birds, along anything else that may exist within our
 environment, then we would be setting ourselves a pretty tough challenge
 and one where the results of any analysis would be hard to fully grasp
@@ -589,43 +589,69 @@ here:
 
 ## Exercises
 
-### Question 1
-
 In these exercises we are going to look at data from a study looking at
-the rodent populations near to Alburquerque, New Mexico.
+the rodent populations near to Albuquerque, New Mexico.
 
 Data is available from 1989 to 2008, with the same sampling processes
 and locations used each year through a "trap and release" sampling
-procedure to identify the number of each species, but also to record the
-weights (biomass) of the identified rodents.
-
-You can read more about the trial here:
+procedure. You can read more about the trial and the methods they used
+here:
 
 <https://biotime.st-andrews.ac.uk/selectStudy.php?study=56>
 
 (And if you would like to look at some cute pictures of rodents to
 distract you from statistics for a while - I highly recommend searching
-for pictures of some of these species!)
+for pictures of some of these species based on their name!)
 
 ```{r}
 DT::datatable(study_56)
 ```
+And you can download the raw data used here:
 
-The question we want to explore is: has the diversity of the rodent
-population within the study area changed over time? If so how?
+```{r dl, context="render",echo=FALSE}
 
-You can explore the data in a few different ways below to help you make
-this assessment, by looking at different visualisations of the data over
-time and different diversity statistics.
+downloadButton("downloadData", "Download Data")
+```
 
-Remind yourself of what each of the summary statistics can tell you, and
-what limitations they may have
+```{r dl_server,context="server"}
 
-As this dataset captured both the abundance and the biomass of the
+output$downloadData <- downloadHandler(
+    filename = function() {
+      # Use the selected dataset as the suggested file name
+      paste0("biotime_study56",".csv")
+    },
+    content = function(file) {
+      # Write the dataset to the `file` that will be downloaded
+  
+      write.csv(study_56, file)
+    }
+  )
+
+```
+
+
+
+The general question we want to explore is:
+
+*Has the diversity of the rodent population within the study area
+changed over time? And if so how?*
+
+Below you can explore the data in a few different ways below to help you
+make this assessment, by looking at different visualisations of the data
+over time and different diversity statistics.
+
+Remind yourself of what each of the diversity statistics can tell you,
+and what limitations they may have. See if you can link the diversity
+statistics to the raw data.
+
+And this dataset captured both the abundance and the biomass of the
 rodents, you can choose to explore the diversity statistics and trends
-based on either biomass or abundance. How does changing the choice of
-variable here change the statistics? Which statistics are most affected
-by the change of variable?
+based on either biomass or abundance.
+
+*How does changing the choice of variable to assess diversity here
+change the interpretation of diversity in the population?*
+
+*Which statistics are most affected by the change of variable?*
 
 #### Tables of Summary Statistics
 
@@ -653,7 +679,8 @@ output$table1<-render_gt({
             "Shannon-Weiner"=vegan::diversity(as.numeric(ABUNDANCE),index="shannon"),
             "Simpson"=vegan::diversity(as.numeric(ABUNDANCE),index="simpson"),
             "Pilou-J Evenness"=`Shannon-Weiner`/log(`Species Richness`))%>%
-    ungroup()
+    ungroup()%>%
+    select(YEAR,`Species Richness`:Dominance,`Dominant Species`,`Shannon-Weiner`:`Pilou-J Evenness`)
   }
   else{
         
@@ -671,13 +698,43 @@ output$table1<-render_gt({
             "Shannon-Weiner"=vegan::diversity(as.numeric(BIOMASS),index="shannon"),
             "Simpson"=vegan::diversity(as.numeric(BIOMASS),index="simpson"),
             "Pilou-J Evenness"=`Shannon-Weiner`/log(`Species Richness`)) %>%
-    ungroup()
+    ungroup() %>%
+    select(YEAR,`Species Richness`:Dominance,`Dominant Species`,`Shannon-Weiner`:`Pilou-J Evenness`)
     
   }
-  gt(diversity_56) %>% fmt_number(5:8,decimals=3)
+  gt(diversity_56) %>% fmt_number(c(4,6:8),decimals=3)
 
 })
 ```
+
+#### Within Year Species Counts
+```{r ex_x_ui, context="render",echo=FALSE}
+
+selectInput("calculationsx",label="Statisics based on:",choices=c("Abundance","Biomass"))
+selectInput("year",label="Year to Plot",
+            choices=1989:2008)
+plotlyOutput("plotx",height = "600px")
+```
+
+```{r ex_x_server, context="server"}
+
+output$plotx<-renderPlotly({
+  study_56$var<-study_56[[toupper(input$calculationsx)]]
+  (study_56 %>%
+      filter(YEAR==as.numeric(input$year)) %>%
+      ungroup() %>%
+    mutate(genus=reorder(paste(GENUS,SPECIES),var,mean)) %>%
+  ggplot(aes(y=genus,x=var))+
+    geom_col(col="black")+
+    xlab(paste("Total",input$calculationsx))+
+      plot_theme+
+    ggtitle(input$year)) %>% ggplotly()
+  
+  
+})
+  
+```
+
 
 #### Time Series of Summary Statistics
 
