@@ -23,6 +23,9 @@ library(gt)
 library(plotly)
 library(tidyverse)
 library(vegan)
+library(png)
+library(jpeg)
+library(grid)
 
 
 plot_theme<-theme_light()+
@@ -347,7 +350,11 @@ Simpson index, both of these look to provide a trade-off between the
 richness and the evenness. Part of the reason why they are so commonly
 used is because the formulae to calculate them are relatively simple:
 
-![](img/formula.png)
+
+```{r, out.width="80%", echo = FALSE}
+img <- readPNG("img/formula.png")
+grid.raster(img)
+```
 
 In most situations they will be extremely highly correlated, and we can
 see that is the case here:
