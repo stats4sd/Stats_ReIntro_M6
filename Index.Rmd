@@ -586,7 +586,7 @@ environments. There are a lot of different metrics that can be used to
 understand this concept of "Beta Diversity" by comparing the similarity
 in the populations of between sites.
 
-There us an often cited paper that outlines 24 different options here:
+There is an often cited paper that outlines 24 different options here:
 <https://besjournals.onlinelibrary.wiley.com/doi/10.1046/j.1365-2656.2003.00710.x>
 
 But that is only the starting point - as that paper solely considers
