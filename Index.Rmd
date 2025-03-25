@@ -32,7 +32,8 @@ plot_theme<-theme_light()+
   theme(plot.title=element_text(face =2,size=18),
         axis.title=element_text(face =2,size=14),
         plot.subtitle=element_text(face =3,size=14),
-        axis.text=element_text(face =1,size=12),
+        axis.text.x=element_text(face =1,size=12),
+                axis.text.y=element_text(face =1,size=7),
         strip.text=element_text(face =1,size=12))
 
 datafiles<-readRDS("data/data.RDS")
@@ -133,9 +134,11 @@ diversity_data<-bird_data %>%
 ```{r,fig.height=10}
 (diversity_data %>%
   mutate(County=reorder(County,`Species Richness`))%>%
-         ggplot(aes(x=`Species Richness`,y=County))+
+         ggplot(aes(x=`Species Richness`,y=County,fill=`Species Richness`))+
   geom_col()+
-  ggtitle("Number of Different Species: Species Richness")) %>%ggplotly()
+   plot_theme+
+   theme(legend.position = "none")+
+  ggtitle("Species Richness",subtitle = "Number of Different Species"))
 ```
 
 Dumfries and Galloway had the most different number of bird species
@@ -216,7 +219,7 @@ comes from the single most dominant species.
 Let's take a look at two of our more extreme counties Cornwall and the
 Shetland Islands:
 
-```{r}
+```{r,fig.height=6}
 bird_data %>%
   mutate(County=trimws(County),Species=trimws(Species)) %>%
   filter(County%in%c("Cornwall","Shetland Islands")) %>%
@@ -224,10 +227,11 @@ bird_data %>%
   group_by(County) %>%
     mutate(RelativeAbundance=Mean_2024/sum(Mean_2024)) %>%
   ungroup() %>%
-  mutate(Species=reorder(Species,as.numeric(RelativeAbundance))) %>%
+  mutate(Species=reorder(str_replace_all(Species,"_"," "),as.numeric(RelativeAbundance))) %>%
   ggplot(aes(y=Species,x=as.numeric(RelativeAbundance)))+
   geom_col(col="black")+
   plot_theme+
+  xlab("Relative Abundance (% of birds in county)")+
   facet_wrap(~County,nrow=1)+
   scale_x_continuous(labels=scales::percent)
 ```
@@ -311,7 +315,7 @@ correlation between the two.
 Let's pick out some of the more extreme counties, to see how this looks
 in relation to the actual data itself:
 
-```{r}
+```{r,fig.height=6,fig.width=8}
 bird_data %>%
   mutate(County=trimws(County),Species=trimws(Species)) %>%
   filter(County%in%c("Isle of Man","Shetland Islands","Dumfries and Galloway")) %>%
@@ -319,10 +323,11 @@ bird_data %>%
   group_by(County) %>%
     mutate(RelativeAbundance=Mean_2024/sum(Mean_2024)) %>%
   ungroup() %>%
-  mutate(Species=reorder(Species,as.numeric(RelativeAbundance))) %>%
+  mutate(Species=reorder(str_replace_all(Species,"_"," "),as.numeric(RelativeAbundance))) %>%
   ggplot(aes(y=Species,x=as.numeric(RelativeAbundance)))+
   geom_col(col="black")+
   plot_theme+
+  xlab("Relative Abundance")+
   facet_wrap(~County,nrow=1)+
   scale_x_continuous(labels=scales::percent)
 ```
@@ -420,7 +425,9 @@ higher value for the Simpson index for North Lanarkshire.
 ```{r}
 diversity_data %>%
   select(County, `Species Richness`,PilouJ,Shannon,Simpson) %>%
-  filter(County%in%c("Merthyr Tydfil","North Lanarkshire")) 
+  filter(County%in%c("Merthyr Tydfil","North Lanarkshire")) %>%
+  gt() %>%
+  fmt_number(3:5)
 ```
 
 The reverse can be seen when comparing Devon and Merseyside - the
@@ -434,7 +441,9 @@ out in the Simpson index.
 ```{r}
 diversity_data %>%
   select(County, `Species Richness`,PilouJ,Shannon,Simpson) %>%
-  filter(County%in%c("Devon","Merseyside")) 
+  filter(County%in%c("Devon","Merseyside")) %>%
+  gt() %>%
+  fmt_number(3:5)
 ```
 
 ### Important Considerations & Limitations
@@ -557,10 +566,10 @@ comparability between these measures through adjustments called
 <https://www.frontiersin.org/journals/microbiology/articles/10.3389/fmicb.2019.02407/full>
 <https://www.scielo.sa.cr/scielo.php?script=sci_arttext&pid=S0034-77442009000300001>
 
-Without the raw data at household data this is not something we can
+Without the raw data at household level this is not something we can
 really pursue too much further with this dataset.
 
-### Other forms of diversity
+### Other ways of considering diversity measurement
 
 These measures of "alpha" diversity also fail to capture diversity
 **across different environments**. Even where we do compare the
