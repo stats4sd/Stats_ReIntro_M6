@@ -66,6 +66,8 @@ trying to interpret measures of diversity.
 
 I talk through in the video here:
 
+![](https://youtu.be/9y77yYKqH9I)
+
 ## Data Used
 
 The data is taken from the 2024 RSPB "Big Garden Birdwatch" - a citizen
@@ -239,7 +241,7 @@ bird_data %>%
 The dominance of the most common species in Cornwall, the House Sparrow,
 is fairly low - it represents 16% of the total population of birds
 observed. In the Shetland islands almost 50% of all birds observed were
-sparrows.
+starlings
 
 This simple measure of dominance immediately gives us some insights into
 the diversity of the two counties - but it is also a very limiting
@@ -405,9 +407,9 @@ situation where it will be less than 1 or more than 4.
 A general interpretation of the value of the index can be given that it
 is equal to the log of Richness multiplied by the Evenness.
 
-As such the value of evenness we used in the previous section, Pilou's
-J, is calculated on this basis: the calculated is made by taking the
-value Shannon Index and dividing it by the log of the number of species.
+And as such the value of evenness we discussed in the previous section, Pilou's
+J, is derived directly on this basis. Pilou's J is calculated by taking the
+value of the Shannon Index and dividing it by the log of the number of species observed.
 
 ### Differences between the two methods
 
